@@ -1,0 +1,5 @@
+crude-oil
+natural-gas
+raw-gas
+steam
+water

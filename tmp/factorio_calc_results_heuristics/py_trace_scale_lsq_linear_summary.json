@@ -1,0 +1,32 @@
+{
+    "config": {
+        "output_prefix": "py_trace_scale_lsq_linear",
+        "use_tracing": true,
+        "use_scaling": true,
+        "solver_method": "lsq_linear",
+        "target_outputs": {
+            "automation-science-pack": 1.0,
+            "logistic-science-pack": 1.0,
+            "py-science-pack-1": 1.0
+        }
+    },
+    "timestamp": "2025-04-22 21:31:59",
+    "solver_stats": {
+        "solver_duration_s": 4.646559000015259,
+        "final_residual_norm": 1.260923834726654,
+        "target_norm": 1.7320508075688772,
+        "relative_residual": 0.727994715407049,
+        "high_residual_warning": true,
+        "solver_internal_rnorm": 1.260923834726654
+    },
+    "problem_size": {
+        "recipes_in_matrix": 924,
+        "items_in_matrix": 991
+    },
+    "results_summary": {
+        "active_recipes_count": 911,
+        "total_multiplier_sum": 160.54341790006333,
+        "raw_resources_needed_count": 3
+    },
+    "total_runtime_s": 0.09323906898498535
+}

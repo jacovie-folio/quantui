@@ -1,0 +1,70 @@
+Initial:
+       1
+o──────x──────┐
+              │
+              │
+              │
+              x 2
+              │
+              │
+              │      3
+              └──────x──────o
+
+Drag first initial anchor up:
+    ┌──x──┐
+    │     │
+    x     x
+    │     │
+o─x─┘     └─x─┐
+              │
+              │
+              │
+              x
+              │
+              │
+              │
+              └──────x──────o
+
+Drag first initial anchor down:
+o─x─┐
+    x
+    └────x────┐
+              │
+              x
+              │
+              │
+              │
+              └──────x──────o
+
+Drag second initial anchor left:
+o─────x────┐
+           │
+           │
+           │
+           x
+           │
+           │
+           │
+           └────────x───────o
+
+Note that the following achieve the same result:
+a. Dragging this horizontal anchor down to meet the same y as the bottommost anchor:
+o─x─┐
+    x
+    └────↓────┐
+         ↓    │
+         ↓    x
+         ↓    │
+         ↓    │
+         ↓    │
+         x    └──────x──────o
+b. Dragging this vertical anchor left:
+o──────x──────┐
+              │
+              │
+              │
+    x←←←←←←←←←←
+              │
+              │
+              │
+              └──────x──────o

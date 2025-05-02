@@ -1,0 +1,4 @@
+item_name,target_rate,achieved_rate,difference,surplus,deficit,abs_difference
+automation-science-pack,1.0,0.0,-1.0,0.0,1.0,1.0
+logistic-science-pack,1.0,0.0,-1.0,0.0,1.0,1.0
+py-science-pack-1,1.0,0.0,-1.0,0.0,1.0,1.0

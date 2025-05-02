@@ -1,0 +1,37 @@
+{
+    "config": {
+        "output_prefix": "py_linprog_unit",
+        "use_tracing": false,
+        "use_scaling": false,
+        "solver_method": "linprog",
+        "lp_cost_function": "unit",
+        "target_outputs": {
+            "automation-science-pack": 1.0,
+            "logistic-science-pack": 1.0,
+            "py-science-pack-1": 1.0
+        }
+    },
+    "timestamp": "2025-04-22 21:40:07",
+    "solver_status": {
+        "success": false,
+        "message": "The problem is infeasible. (HiGHS Status 8: model_status is Infeasible; primal_status is None)"
+    },
+    "solver_stats": {
+        "solver_duration_s": 0.006525993347167969,
+        "final_residual_norm": 1.7320508075688772,
+        "target_norm": 1.7320508075688772,
+        "relative_residual": 1.0,
+        "high_residual_warning": true,
+        "solver_internal_rnorm_or_cost": -1.0
+    },
+    "problem_size": {
+        "recipes_in_matrix": 5544,
+        "items_in_matrix": 3050
+    },
+    "results_summary": {
+        "active_recipes_count": 0,
+        "total_multiplier_sum": 0,
+        "raw_resources_needed_count": 0
+    },
+    "total_runtime_s": 0.10137605667114258
+}
