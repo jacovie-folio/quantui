@@ -9,12 +9,15 @@ import {
   RecipeName,
 } from '../../../data';
 import { GRID_SIZE, roundPosition } from '../const';
+import { FactoryLayoutEdge } from '../edges';
+import { Segment } from '../edges/FigmaEdge';
 import { FactoryLayoutNode } from '../nodes';
 
 export type OnOpenDialogEvent =
   | {
       type: 'machine-selector';
       initialPosition: { x: number; y: number };
+      recipesOnly?: boolean;
     }
   | {
       type: 'recipe-selector';
@@ -24,7 +27,7 @@ export type OnOpenDialogEvent =
 
 export interface FactoryLayoutContext {
   currentDialog: OnOpenDialogEvent | null;
-  onOpenDialog: (event: OnOpenDialogEvent) => void;
+  onOpenDialog: (event: OnOpenDialogEvent, initialSearchTerm?: string) => void;
   onCloseDialog: () => void;
 
   dialogSearchTerm: string;
@@ -32,11 +35,15 @@ export interface FactoryLayoutContext {
 
   onAddMachine: (
     machine: CraftingEntityName,
-    initialPosition: XYPosition
+    initialPosition: XYPosition,
+    recipe?: RecipeName
   ) => void;
   onSetMachineRecipe: (id: string, recipe: RecipeName) => void;
+  onUpdateMachineMultiplier: (id: string, multiplier: number) => void;
 
   onAddItem: (item: ItemName, initialPosition: XYPosition) => void;
+
+  onChangeEdgeSegments: (edgeId: string, segments: Segment[]) => void;
 }
 
 const FactoryLayoutContext = React.createContext<FactoryLayoutContext>({
@@ -47,14 +54,18 @@ const FactoryLayoutContext = React.createContext<FactoryLayoutContext>({
   onChangeDialogSearchTerm: () => null,
   onAddMachine: () => null,
   onSetMachineRecipe: () => null,
+  onUpdateMachineMultiplier: () => null,
+
   onAddItem: () => null,
+
+  onChangeEdgeSegments: () => null,
 });
 
 export const FactoryLayoutProvider: React.FC<{
   setNodes: React.Dispatch<React.SetStateAction<FactoryLayoutNode[]>>;
-  // setEdges: React.Dispatch<React.SetStateAction<Edge[]>>;
+  setEdges: React.Dispatch<React.SetStateAction<FactoryLayoutEdge[]>>;
   children: React.ReactNode;
-}> = ({ setNodes, children }) => {
+}> = ({ setNodes, setEdges, children }) => {
   const [dialog, setDialog] = React.useState<
     Pick<FactoryLayoutContext, 'currentDialog' | 'dialogSearchTerm'>
   >({
@@ -63,8 +74,8 @@ export const FactoryLayoutProvider: React.FC<{
   });
 
   const onOpenDialog = React.useCallback(
-    (event: OnOpenDialogEvent) =>
-      setDialog({ currentDialog: event, dialogSearchTerm: '' }),
+    (event: OnOpenDialogEvent, initialSearchTerm: string = '') =>
+      setDialog({ currentDialog: event, dialogSearchTerm: initialSearchTerm }),
     [setDialog]
   );
 
@@ -84,7 +95,11 @@ export const FactoryLayoutProvider: React.FC<{
   );
 
   const onAddMachine = React.useCallback(
-    (machine: CraftingEntityName, initialPosition: XYPosition) =>
+    (
+      machine: CraftingEntityName,
+      initialPosition: XYPosition,
+      recipe?: RecipeName
+    ) =>
       setNodes((priorNodes) => [
         ...priorNodes,
         {
@@ -94,6 +109,8 @@ export const FactoryLayoutProvider: React.FC<{
           position: roundPosition(initialPosition),
           data: {
             machine,
+            recipe,
+            multiplier: 1,
           },
         },
       ]),
@@ -111,6 +128,23 @@ export const FactoryLayoutProvider: React.FC<{
                 data: {
                   ...node.data,
                   recipe,
+                },
+              }
+        )
+      ),
+    [setNodes]
+  );
+  const onUpdateMachineMultiplier = React.useCallback(
+    (id: string, multiplier: number) =>
+      setNodes((priorNodes) =>
+        priorNodes.map((node) =>
+          node.id !== id || node.type !== 'machine'
+            ? node
+            : {
+                ...node,
+                data: {
+                  ...node.data,
+                  multiplier,
                 },
               }
         )
@@ -139,6 +173,25 @@ export const FactoryLayoutProvider: React.FC<{
     [setNodes]
   );
 
+  const onChangeEdgeSegments = React.useCallback(
+    (edgeId: string, segments: Segment[]) => {
+      setEdges((edges) =>
+        edges.map((edge) => ({
+          ...edge,
+          ...(edge.id === edgeId
+            ? {
+                data: {
+                  ...edge.data,
+                  segments,
+                },
+              }
+            : {}),
+        }))
+      );
+    },
+    [setEdges]
+  );
+
   return (
     <FactoryLayoutContext.Provider
       value={{
@@ -149,7 +202,9 @@ export const FactoryLayoutProvider: React.FC<{
         onChangeDialogSearchTerm,
         onAddMachine,
         onSetMachineRecipe,
+        onUpdateMachineMultiplier,
         onAddItem,
+        onChangeEdgeSegments,
       }}
     >
       {children}

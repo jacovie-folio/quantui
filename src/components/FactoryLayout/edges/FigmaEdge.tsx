@@ -1,6 +1,7 @@
 import { useTheme } from '@mui/material';
 import { Edge, EdgeProps, useReactFlow } from '@xyflow/react';
 import React, { useEffect, useState } from 'react';
+import { GRID_SIZE } from '../const';
 
 export interface Segment {
   id: number;
@@ -29,8 +30,8 @@ export const reduceSegments = (segments: Segment[]) => {
     if (
       next &&
       afterNext &&
-      curr.to[0] === afterNext.from[0] &&
-      curr.to[1] === afterNext.from[1]
+      Math.abs(curr.to[0] - afterNext.from[0]) < NEW_SEGMENT_OFFSET / 2 &&
+      Math.abs(curr.to[1] - afterNext.from[1]) < NEW_SEGMENT_OFFSET / 2
     ) {
       // Collapse i, i+1, i+2 into one segment
       reduced.push({
@@ -49,11 +50,77 @@ export const reduceSegments = (segments: Segment[]) => {
   return reduced;
 };
 
-const NEW_SEGMENT_OFFSET = 12;
-const ANCHOR_WIDTH = 8;
-const ANCHOR_HEIGHT = 4;
+const NEW_SEGMENT_OFFSET = GRID_SIZE / 4;
+const ANCHOR_WIDTH = GRID_SIZE / 2;
+const ANCHOR_HEIGHT = GRID_SIZE / 4;
 
-const FigmaEdge: React.FC<EdgeProps<Edge<FigmaEdgeData>>> = ({
+function generateRoundedPath(segments: Segment[], borderRadius: number) {
+  if (segments.length === 0) return '';
+
+  let pathD = '';
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i];
+    const [fromX, fromY] = seg.from;
+    const [toX, toY] = seg.to;
+
+    if (i === 0) {
+      pathD += `M ${fromX},${fromY} `;
+    }
+
+    // Check if there is a next segment to create a rounded corner
+    const nextSeg = segments[i + 1];
+    if (!nextSeg) {
+      // No next segment, just draw a straight line to the end
+      pathD += `L ${toX},${toY} `;
+      break;
+    }
+
+    const [nextFromX, nextFromY] = nextSeg.from;
+    const [nextToX, nextToY] = nextSeg.to;
+
+    // Ensure continuity (optional): segments should be connected
+    if (toX !== nextFromX || toY !== nextFromY) {
+      pathD += `L ${toX},${toY} `;
+      continue;
+    }
+
+    // Direction vectors
+    const v1 = [toX - fromX, toY - fromY];
+    const v2 = [nextToX - toX, nextToY - toY];
+
+    const len1 = Math.hypot(...v1);
+    const len2 = Math.hypot(...v2);
+
+    const r = Math.min(borderRadius, len1 / 2, len2 / 2);
+
+    // Unit vectors
+    const u1 = [v1[0] / len1, v1[1] / len1];
+    const u2 = [v2[0] / len2, v2[1] / len2];
+
+    // Points before and after the corner
+    const cornerStart = [toX - u1[0] * r, toY - u1[1] * r];
+    const cornerEnd = [toX + u2[0] * r, toY + u2[1] * r];
+
+    // Line to corner start
+    pathD += `L ${cornerStart[0]},${cornerStart[1]} `;
+
+    // Rounded corner via quadratic Bézier
+    pathD += `Q ${toX},${toY} ${cornerEnd[0]},${cornerEnd[1]} `;
+  }
+
+  return pathD.trim();
+}
+
+export type FigmaEdge = Edge<FigmaEdgeData, 'figma'>;
+
+const roundCoord = (c: number) =>
+  Math.round(c / (GRID_SIZE / 4)) * (GRID_SIZE / 4);
+const roundCoords = (cs: [number, number]): [number, number] => [
+  roundCoord(cs[0]),
+  roundCoord(cs[1]),
+];
+
+export const FigmaEdgeSVG: React.FC<EdgeProps<FigmaEdge>> = ({
   id,
   sourceX,
   sourceY,
@@ -61,6 +128,7 @@ const FigmaEdge: React.FC<EdgeProps<Edge<FigmaEdgeData>>> = ({
   targetY,
   data,
   markerEnd,
+  selected,
 }) => {
   const { setEdges } = useReactFlow();
   const [segments, setSegments] = useState<Segment[]>(() => {
@@ -89,11 +157,16 @@ const FigmaEdge: React.FC<EdgeProps<Edge<FigmaEdgeData>>> = ({
   }, [segments, id, setEdges]);
 
   // Generate SVG path from segments
-  const pathD = segments.reduce((acc, seg, idx) => {
-    const [fromX, fromY] = seg.from;
-    const [toX, toY] = seg.to;
-    return acc + (idx === 0 ? `M ${fromX},${fromY} ` : '') + `L ${toX},${toY} `;
-  }, '');
+  // const pathD = segments.reduce((acc, seg, idx) => {
+  //   const [fromX, fromY] = seg.from;
+  //   const [toX, toY] = seg.to;
+  //   return acc + (idx === 0 ? `M ${fromX},${fromY} ` : '') + `L ${toX},${toY} `;
+  // }, '');
+
+  const pathD = React.useMemo(
+    () => generateRoundedPath(segments, GRID_SIZE / 2),
+    [segments]
+  );
 
   // Calculate anchor positions
   const anchors = segments.map((seg) => {
@@ -106,8 +179,8 @@ const FigmaEdge: React.FC<EdgeProps<Edge<FigmaEdgeData>>> = ({
 
   // Handle anchor drag
   const handleDrag = (id: number, rawX: number, rawY: number) => {
-    const x = Math.round(rawX);
-    const y = Math.round(rawY);
+    const x = roundCoord(rawX);
+    const y = roundCoord(rawY);
     setSegments((prevSegments) => {
       if (!prevSegments) return prevSegments;
       let newSegments: Segment[] = [...prevSegments];
@@ -200,9 +273,38 @@ const FigmaEdge: React.FC<EdgeProps<Edge<FigmaEdgeData>>> = ({
     });
   };
 
+  const [endpoints, setEndpoints] = React.useState({
+    sourceX,
+    sourceY,
+    targetX,
+    targetY,
+  });
+
   React.useLayoutEffect(() => {
+    const dx =
+      (sourceX - endpoints.sourceX - (endpoints.targetX - targetX)) / 2;
+    const dy =
+      (sourceY - endpoints.sourceY - (endpoints.targetY - targetY)) / 2;
     setSegments((prevSegments) => {
-      const newSegments = [...prevSegments];
+      const newSegments: Segment[] = prevSegments.map((segment) => ({
+        ...segment,
+        to: roundCoords([
+          sourceX +
+            ((targetX - sourceX) / (endpoints.targetX - endpoints.sourceX)) *
+              (segment.to[0] - endpoints.sourceX),
+          sourceY +
+            ((targetY - sourceY) / (endpoints.targetY - endpoints.sourceY)) *
+              (segment.to[1] - endpoints.sourceY),
+        ]),
+        from: roundCoords([
+          sourceX +
+            ((targetX - sourceX) / (endpoints.targetX - endpoints.sourceX)) *
+              (segment.from[0] - endpoints.sourceX),
+          sourceY +
+            ((targetY - sourceY) / (endpoints.targetY - endpoints.sourceY)) *
+              (segment.from[1] - endpoints.sourceY),
+        ]),
+      }));
       newSegments[0].from[0] = sourceX;
       newSegments[0].from[1] = sourceY;
       newSegments[0].to[1] = sourceY;
@@ -214,7 +316,10 @@ const FigmaEdge: React.FC<EdgeProps<Edge<FigmaEdgeData>>> = ({
       newSegments[newSegments.length - 1].to[1] = targetY;
       return reduceSegments(newSegments);
     });
-  }, [sourceX, sourceY, targetX, targetY]);
+    if (dx || dy) {
+      setEndpoints({ sourceX, sourceY, targetX, targetY });
+    }
+  }, [sourceX, sourceY, targetX, targetY, endpoints]);
 
   const [pointerOver, setPointerOver] = useState<number | null>(null);
 
@@ -257,11 +362,13 @@ const FigmaEdge: React.FC<EdgeProps<Edge<FigmaEdgeData>>> = ({
         d={pathD}
         fill="none"
         stroke={
-          hovered || pointerOver !== null
+          selected
             ? theme.palette.secondary.main
+            : hovered || pointerOver !== null
+            ? theme.palette.primary.main
             : theme.palette.divider
         }
-        strokeWidth={2}
+        strokeWidth={GRID_SIZE / 8}
         markerEnd={markerEnd}
       />
       <path
@@ -332,5 +439,3 @@ const FigmaEdge: React.FC<EdgeProps<Edge<FigmaEdgeData>>> = ({
     </>
   );
 };
-
-export default FigmaEdge;

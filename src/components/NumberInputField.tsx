@@ -1,5 +1,6 @@
-import { InputAdornment, TextField } from '@mui/material';
+import { InputAdornment, TextField, TextFieldProps } from '@mui/material';
 import React from 'react';
+import { parseMathExpression } from '../parsers/parseMathExp';
 
 interface NumberInputFieldProps {
   label?: string;
@@ -18,18 +19,14 @@ interface NumberInputFieldProps {
   fullWidth?: boolean;
   required?: boolean;
   name?: string;
+  sx?: TextFieldProps['sx'];
 }
 
 const NumberInputField: React.FC<NumberInputFieldProps> = ({
   label,
   value,
   onChange,
-  min,
-  max,
-  step = 1,
-  precision,
   disabled = false,
-  readOnly = false,
   error = false,
   helperText,
   startAdornment,
@@ -37,54 +34,63 @@ const NumberInputField: React.FC<NumberInputFieldProps> = ({
   fullWidth = true,
   required = false,
   name,
+  sx,
 }) => {
+  const [inputValue, setInputValue] = React.useState(`${value}`);
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
 
-    // Allow empty string to temporarily show
-    if (val === '') {
-      onChange(NaN);
-      return;
-    }
+    setInputValue(val);
 
-    let parsed = parseFloat(val);
-    if (!isNaN(parsed)) {
-      if (precision !== undefined) {
-        parsed = parseFloat(parsed.toFixed(precision));
-      }
-      if (min !== undefined && parsed < min) parsed = min;
-      if (max !== undefined && parsed > max) parsed = max;
-      onChange(parsed);
-    }
+    // const parsedExp = parseMathExpression(val);
+    // if (!Number.isNaN(parsedExp)) {
+    //   onChange(parsedExp);
+    // }
   };
 
+  const fieldRef = React.useRef<HTMLDivElement>(null);
+
   return (
-    <TextField
-      type="number"
-      name={name}
-      label={label}
-      value={value === undefined || isNaN(Number(value)) ? '' : value}
-      onChange={handleChange}
-      inputProps={{
-        min,
-        max,
-        step,
-        readOnly,
-      }}
-      InputProps={{
-        startAdornment: startAdornment ? (
-          <InputAdornment position="start">{startAdornment}</InputAdornment>
-        ) : undefined,
-        endAdornment: endAdornment ? (
-          <InputAdornment position="end">{endAdornment}</InputAdornment>
-        ) : undefined,
-      }}
-      fullWidth={fullWidth}
-      disabled={disabled}
-      error={error}
-      helperText={helperText}
-      required={required}
-    />
+    <>
+      <TextField
+        variant="standard"
+        name={name}
+        label={label}
+        value={inputValue}
+        onChange={handleChange}
+        onKeyDown={(e) => {
+          console.log(e.key);
+          if (e.key === 'Enter') {
+            fieldRef.current?.blur();
+          }
+        }}
+        inputRef={fieldRef}
+        slotProps={{
+          input: {
+            onBlur: () => {
+              const parsedExp = parseMathExpression(inputValue);
+              if (!Number.isNaN(parsedExp)) {
+                onChange(parsedExp);
+                setInputValue(`${parsedExp}`);
+              }
+            },
+            startAdornment: startAdornment ? (
+              <InputAdornment position="start">{startAdornment}</InputAdornment>
+            ) : undefined,
+            endAdornment: endAdornment ? (
+              <InputAdornment position="end">{endAdornment}</InputAdornment>
+            ) : undefined,
+          },
+        }}
+        fullWidth={fullWidth}
+        disabled={disabled}
+        error={error}
+        helperText={helperText}
+        required={required}
+        sx={sx}
+      />
+    </>
   );
 };
 

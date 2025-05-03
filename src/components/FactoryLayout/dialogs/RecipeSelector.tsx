@@ -1,27 +1,20 @@
 export {};
 import SearchIcon from '@mui/icons-material/Search';
 import {
-  Avatar,
-  Box,
   Button,
   Dialog,
   DialogContent,
   DialogTitle,
   InputAdornment,
-  List,
-  ListItem,
-  ListItemAvatar,
-  ListItemText,
   Stack,
   TextField,
   Tooltip,
-  Typography,
 } from '@mui/material';
 import React from 'react';
 import { RecipeByCategoryDictionary, RecipeDictionary } from '../../../data';
-import { formatNumberForDisplay } from '../../../formatters/numeric';
 import { isSearchMatch } from '../../../formatters/string';
 import { Icon, ICON_SIZE } from '../../Icon';
+import { RecipeCard } from '../cards';
 import { useFactoryLayout } from '../hooks/useFactoryLayout';
 
 export const RecipeSelectorDialog: React.FC = () => {
@@ -95,85 +88,7 @@ export const RecipeSelectorDialog: React.FC = () => {
                   },
                 },
               }}
-              title={
-                <Box
-                  sx={{
-                    fontFamily: 'monospace',
-                    overflow: 'hidden',
-                  }}
-                >
-                  <Box sx={{ backgroundColor: 'primary.light', px: 1 }}>
-                    <Typography
-                      variant="subtitle1"
-                      fontWeight="bold"
-                      sx={{
-                        color: 'background.paper',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {recipe.display}
-                    </Typography>
-                  </Box>
-                  <Stack direction="row" spacing={1}>
-                    <Stack spacing={0} py={2} px={1}>
-                      <Typography variant="body2">
-                        <strong>Ingredients:</strong>
-                      </Typography>
-                      <List dense>
-                        {recipe.ingredients.map((ingredient) => (
-                          <ListItem
-                            key={`ingredient:${ingredient.name}`}
-                            secondaryAction={
-                              <Typography variant="subtitle2">
-                                {formatNumberForDisplay(
-                                  ingredient.getRate(recipe.duration).rate
-                                    .amountPerSecond
-                                )}
-                              </Typography>
-                            }
-                          >
-                            <ListItemAvatar>
-                              <Avatar variant="rounded">
-                                <Icon name={ingredient.getIcon()} scale={0.5} />
-                              </Avatar>
-                            </ListItemAvatar>
-                            <ListItemText>
-                              {ingredient.getDisplay()}
-                            </ListItemText>
-                          </ListItem>
-                        ))}
-                      </List>
-                    </Stack>
-                    <Stack spacing={0} py={2} px={1}>
-                      <Typography variant="body2">
-                        <strong>Products:</strong>
-                      </Typography>
-                      <List dense>
-                        {recipe.products.map((product) => (
-                          <ListItem
-                            key={`product:${product.name}`}
-                            secondaryAction={
-                              <Typography variant="subtitle2">
-                                {formatNumberForDisplay(
-                                  product.getRate(recipe.duration).rate
-                                    .amountPerSecond
-                                )}
-                              </Typography>
-                            }
-                          >
-                            <ListItemAvatar>
-                              <Avatar variant="rounded">
-                                <Icon name={product.getIcon()} scale={0.5} />
-                              </Avatar>
-                            </ListItemAvatar>
-                            <ListItemText>{product.getDisplay()}</ListItemText>
-                          </ListItem>
-                        ))}
-                      </List>
-                    </Stack>
-                  </Stack>
-                </Box>
-              }
+              title={<RecipeCard recipe={recipe} />}
             >
               <Button
                 variant="outlined"
