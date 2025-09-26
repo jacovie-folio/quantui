@@ -1,425 +1,225 @@
-import json
+#!/usr/bin/env python3
+"""
+Music Analysis Pipeline: Source Separation + MIDI Transcription
+
+This script takes an audio file, separates it into stems using Demucs,
+then transcribes each stem to MIDI using audio-to-midi (Python 3.13 compatible).
+
+Requirements:
+pip install demucs audio-to-midi librosa soundfile
+
+Usage:
+python music_pipeline.py path/to/song.mp3
+"""
+
+import os
 import sys
-import time
-from typing import Dict, List, Union, Optional, MutableSet
-import math
-import random
-import csv
-# --- Type Definitions ---
+import argparse
+from pathlib import Path
+import librosa
+import soundfile as sf
+import subprocess
+import tempfile
+import shutil
 
-# Use total=False as many fields can be missing depending on the item/recipe type
-# and specific mods. Accessing non-existent keys will still cause runtime errors
-# if not handled, but this reflects the flexible nature of the data dump.
-
-
-class IngredientData(dict):
-    name: str
-    amount: float  # Consistently use float after loading/validation
-    type: str  # "item" or "fluid" usually
-    # catalyst_amount: float # Less common in standard dumps
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.name = self['name']
-        self.amount = float(self['amount'])
-        self.type = self['type']
-
-
-class ProductData(dict):
-    name: str
-    amount: float  # Expected average amount (calculated if min/max present)
-    amount_min: float
-    amount_max: float
-    probability: float
-    type: str  # "item" or "fluid" usually
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.name = self['name']
-        self.amount = float(self['amount']) if 'amount' in self else None
-        self.amount_min = float(
-            self['amount_min']) if 'amount_min' in self else None
-        self.amount_max = float(
-            self['amount_max']) if 'amount_max' in self else None
-        self.probability = float(
-            self['probability']) if 'probability' in self else None
-        self.type = self['type']
-
-    def get_amount(self) -> float:
-        """Calculate the expected amount based on min/max or probability."""
-        if 'amount' in self:
-            return self['amount'] * self.get('probability', 1.0)
-        elif 'amount_min' in self and 'amount_max' in self:
-            return ((self['amount_min'] + self['amount_max']) / 2)*self.get('probability', 1.0)
-        else:
-            raise ValueError(
-                "Invalid product data: missing amount information")
-
-
-class RecipeData(dict):
-    # Required fields (make these non-optional if always present)
-    name: str
-    energy: float  # Store as float after loading/validation
-    # Use Dict initially, refine after validation
-    ingredients: List[Union[IngredientData, Dict]]
-    # Use Dict initially, refine after validation
-    products: List[Union[ProductData, Dict]]
-    category: Optional[str]
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-
-        self.name = self['name']
-        self.energy = self['energy']
-        self.category = self['category']
-
-        # Convert ingredients and products to the correct types
-        self.ingredients = [IngredientData(
-            **i) if isinstance(i, dict) else i for i in self['ingredients']]
-        self.products = [ProductData(
-            **p) if isinstance(p, dict) else p for p in self['products']]
-        # Ensure energy is a float
-        self.energy = float(self.energy)
-
-    def get_products(self):
-        """Calculate and return the products of the recipe."""
-        products = []
-        for product in self.products:
-            name = product['name']
-            amount = product.get_amount() / self.energy
-            products.append({"name": name, "rate": amount})
-        return products
-
-    def get_rates(self) -> Dict[str, float]:
-        """Calculate and return the rates of ingredients and products."""
-        rates = {}
-        for ingredient in self.ingredients:
-            name = ingredient.name
-            rate = ingredient.amount / self.energy
-            rates[name] = rates.get(name, 0) - rate
-        for product in self.products:
-            name = product.name
-            rate = product.get_amount() / self.energy
-            rates[name] = rates.get(name, 0) + rate
-        return rates
-
-
-class EntityData():
-    name: str
-    crafting_speed: float | None
-    crafting_categories: List[str] | None
-    resource_category: str | None
-    mineable_products: List[ProductData] | None
-
-    def __init__(self, **kwargs):
-        self.name = kwargs.get('name')
-
-        kw_crafting_speed = kwargs.get('get_crafting_speed', None)
-        if kw_crafting_speed is not None:
-            self.crafting_speed = kw_crafting_speed[0]
-        else:
-            self.crafting_speed = None
-
-        kw_crafting_categories = kwargs.get('crafting_categories', None)
-        if kw_crafting_categories is not None:
-            self.crafting_categories = [
-                key for key in kw_crafting_categories.keys() if kw_crafting_categories[key]]
-        else:
-            self.crafting_categories = None
-
-        kw_resource_category = kwargs.get('resource_category', None)
-        if kw_resource_category is not None:
-            self.resource_category = kw_resource_category
-        else:
-            self.resource_category = None
-
-        kw_mineable_properties = kwargs.get('mineable_properties', None)
-        if kw_mineable_properties is not None:
-            self.mineable_products = [ProductData(
-                **product) for product in kw_mineable_properties.get('products', [])]
-        else:
-            self.mineable_products = None
-
-
-def load_recipes(path: str) -> Dict[str, RecipeData]:
-    print(f"📥 Loading recipes from {path}...")
+try:
+    from audio_to_midi.monophonic import wave_to_midi
+    TRANSCRIPTION_METHOD = "audio_to_midi"
+except ImportError:
     try:
-        with open(path, "r") as f:
-            recipes = json.load(f)
-        print(f"✔️  Loaded {len(recipes)} total recipes")
-        recipes_map = {r['name']: RecipeData(
-            **r) for r in recipes if 'name' in r}
-        return recipes_map
-    except FileNotFoundError:
-        print(f"❌ ERROR: Recipe file not found at {path}")
-        sys.exit(1)
-    except json.JSONDecodeError:
-        print(f"❌ ERROR: Could not decode JSON from {path}")
+        from basic_pitch.inference import predict
+        TRANSCRIPTION_METHOD = "basic_pitch"
+    except ImportError:
+        print("Neither audio-to-midi nor basic-pitch available!")
+        print("Install one of: pip install audio-to-midi OR pip install basic-pitch")
         sys.exit(1)
 
 
-def load_entities(path: str) -> Dict[str, EntityData]:
-    print(f"📥 Loading entities from {path}...")
+def separate_audio(input_file, output_dir):
+    """
+    Use Demucs to separate audio into stems.
+    Returns dict with paths to separated stems.
+    """
+    print(f"Separating audio: {input_file}")
+
+    # Run demucs command
+    cmd = [
+        "python", "-m", "demucs.separate",
+        "--two-stems=vocals",  # This gives vocals + accompaniment
+        "-o", str(output_dir),
+        str(input_file)
+    ]
+
     try:
-        with open(path, "r") as f:
-            entities = json.load(f)
-        print(f"✔️  Loaded {len(entities)} total entities")
-        entities_map = {e['name']: EntityData(
-            **e) for e in entities if 'name' in e}
-        return entities_map
-    except FileNotFoundError:
-        print(f"❌ ERROR: Entity file not found at {path}")
-        sys.exit(1)
-    except json.JSONDecodeError:
-        print(f"❌ ERROR: Could not decode JSON from {path}")
-        sys.exit(1)
+        subprocess.run(cmd, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as e:
+        print(f"Demucs separation failed: {e}")
+        print(f"Error output: {e.stderr}")
+        raise
+
+    # Find the output files
+    # Demucs creates: output_dir/htdemucs/filename/vocals.wav and no_vocals.wav
+    song_name = Path(input_file).stem
+    stems_dir = output_dir / "htdemucs" / song_name
+
+    stems = {}
+    if (stems_dir / "vocals.wav").exists():
+        stems["vocals"] = stems_dir / "vocals.wav"
+    if (stems_dir / "no_vocals.wav").exists():
+        stems["accompaniment"] = stems_dir / "no_vocals.wav"
+
+    return stems
 
 
-def simple_production_solver(recipes, targets):
-    # Initialize
-    inventory = {}
-    recipe_usage = {}
-    for item, rate in targets.items():
-        inventory[item] = -rate  # deficits are negative
-
-    while True:
-        # Find the most negative item
-        needed = [(item, amt)
-                  for item, amt in inventory.items() if amt < -1e-6]
-        if not needed:
-            break  # All deficits covered
-
-        # Sort by how bad the deficit is
-        needed.sort(key=lambda x: x[1])
-        item, deficit = needed[0]
-
-        # Find recipes that produce this
-        candidates = [r for r in recipes if any(
-            p['name'] == item for p in r.get_products())]
-        if not candidates:
-            raise ValueError(f"No recipe produces {item}")
-
-        # Pick the "best" recipe: least waste, best efficiency
-        def score(recipe):
-            product_amount = sum(p['amount']
-                                 for p in recipe.get_products() if p['name'] == item)
-            waste = sum(p['amount']
-                        for p in recipe.get_products() if p['name'] != item)
-            return (waste, -product_amount)  # lower waste, higher yield
-
-        best = sorted(candidates, key=score)[0]
-
-        # How much does this recipe produce per use?
-        output_per = sum(p['amount']
-                         for p in best.get_products() if p['name'] == item)
-        multiplier = math.ceil(abs(deficit) / output_per)
-
-        # Apply the recipe
-        for p in best.get_products():
-            if p['name'] not in inventory:
-                inventory[p['name']] = 0.0
-            inventory[p['name']] += p['amount'] * multiplier
-        for ing in best['ingredients']:
-            if ing['name'] not in inventory:
-                inventory[ing['name']] = 0.0
-            amount = ing['amount'] * multiplier
-            if amount > 1e100:  # Adjust this if needed
-                print(
-                    f"⚠️ Ingredient amount too large: {ing['name']} x {amount} (multiplier = {multiplier}) from {best['name']}")
-                raise OverflowError(
-                    "Suspiciously large value; check recipe graph.")
-            inventory[ing['name']] -= ing['amount'] * multiplier
-
-        if best['name'] not in recipe_usage:
-            recipe_usage[best['name']] = 0.0
-        recipe_usage[best['name']] += multiplier
-
-    return recipe_usage, dict(inventory)
-
-
-def get_plan_rates(recipes_map, recipe_plan):
-    rates = {'space-science-pack': -15.0}
-    for recipe, multiplier in recipe_plan.items():
-        for item, rate in recipes_map[recipe].get_rates().items():
-            if item not in rates:
-                rates[item] = 0.0
-            rates[item] += rate*multiplier
-    return rates
-
-
-def get_plan_score(recipes_map, recipe_plan):
-    score = 0.0
-    for rate in get_plan_rates(recipes_map, recipe_plan).values():
-        score += abs(rate)
-    return score
-
-
-def get_plan_deficits(recipes_map, recipe_plan, resources, blocked_items):
-    deficits = []
-
-    for item, rate in get_plan_rates(recipes_map, recipe_plan).items():
-        if rate < 0.0 and resources.isdisjoint([item]) and blocked_items.isdisjoint([item]):
-            deficits.append((item, rate))
-    return deficits
-
-
-def find_best_recipe_for_item(recipes_map, recipes_by_product, recipes_to_ignore, recipe_plan, item: str, target_rate: float) -> Optional[tuple[str, float]]:
+def separate_audio_4stems(input_file, output_dir):
     """
-    Finds the recipe with the least number of ingredients to produce the given item
-    and calculates the multiplier needed to meet the target rate.
-
-    Args:
-        item (str): The name of the item to produce.
-        target_rate (float): The desired production rate of the item.
-
-    Returns:
-        Optional[tuple[str, float]]: A tuple containing the recipe name and the multiplier,
-                                        or None if no recipe produces the item.
+    Use Demucs to separate audio into 4 stems (vocals, drums, bass, other).
+    Returns dict with paths to separated stems.
     """
-    if item not in recipes_by_product:
-        print(f"No recipe found for {item}")
+    print(f"Separating audio into 4 stems: {input_file}")
+
+    # Run demucs command for 4-stem separation
+    cmd = [
+        "python", "-m", "demucs.separate",
+        "-o", str(output_dir),
+        str(input_file)
+    ]
+
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as e:
+        print(f"Demucs separation failed: {e}")
+        print(f"Error output: {e.stderr}")
+        raise
+
+    # Find the output files
+    # Demucs creates: output_dir/htdemucs/filename/{vocals,drums,bass,other}.wav
+    song_name = Path(input_file).stem
+    stems_dir = output_dir / "htdemucs" / song_name
+
+    stems = {}
+    for stem_name in ["vocals", "drums", "bass", "other"]:
+        stem_path = stems_dir / f"{stem_name}.wav"
+        if stem_path.exists():
+            stems[stem_name] = stem_path
+
+    return stems
+
+
+def transcribe_to_midi(audio_file, output_dir):
+    """
+    Transcribe audio to MIDI using available library.
+    Returns path to generated MIDI file.
+    """
+    print(f"Transcribing to MIDI using {TRANSCRIPTION_METHOD}: {audio_file}")
+
+    try:
+        stem_name = Path(audio_file).stem
+        midi_path = output_dir / f"{stem_name}.mid"
+
+        if TRANSCRIPTION_METHOD == "audio_to_midi":
+            # Simple monophonic transcription
+            wave_to_midi(str(audio_file), str(midi_path))
+
+        elif TRANSCRIPTION_METHOD == "basic_pitch":
+            # More advanced polyphonic transcription
+            audio, sr = librosa.load(audio_file, sr=22050, mono=True)
+            model_output, midi_data, note_events = predict(audio)
+            midi_data.write(str(midi_path))
+
+        print(f"MIDI saved: {midi_path}")
+        return midi_path
+
+    except Exception as e:
+        print(f"MIDI transcription failed for {audio_file}: {e}")
         return None
 
-    candidates = []
-    for recipe_name in recipes_by_product[item]:
-        if recipes_to_ignore.isdisjoint([recipe_name]) and recipe_name not in recipe_plan:
-            candidates.append(recipes_map[recipe_name])
 
-    if not candidates:
-        return None  # No recipe produces the item
+def process_song(input_file, output_base_dir, use_4stems=True):
+    """
+    Complete pipeline: separate audio and transcribe each stem to MIDI.
+    """
+    input_path = Path(input_file)
+    if not input_path.exists():
+        raise FileNotFoundError(f"Input file not found: {input_file}")
 
-    # Sort candidates by the number of ingredients (ascending)
-    candidates.sort(key=lambda r: len(r.ingredients))
+    # Create output directory
+    song_name = input_path.stem
+    output_dir = Path(output_base_dir) / song_name
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Select the best recipe (most number of ingredients)
-    best_recipe = candidates[-1]
+    # Temporary directory for Demucs output
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_path = Path(temp_dir)
 
-    # Calculate the multiplier to meet the target rate
-    output_rate = sum(
-        product.get_amount() / best_recipe.energy
-        for product in best_recipe.products if product.name == item
-    )
-    multiplier = target_rate / output_rate
+        # Step 1: Separate audio
+        if use_4stems:
+            stems = separate_audio_4stems(input_file, temp_path)
+        else:
+            stems = separate_audio(input_file, temp_path)
 
-    return best_recipe.name, multiplier
+        if not stems:
+            print("No stems were generated!")
+            return
+
+        print(f"Generated {len(stems)} stems: {list(stems.keys())}")
+
+        # Step 2: Copy stems to output directory
+        stems_dir = output_dir / "stems"
+        stems_dir.mkdir(exist_ok=True)
+
+        final_stems = {}
+        for stem_name, stem_path in stems.items():
+            final_path = stems_dir / f"{stem_name}.wav"
+            shutil.copy2(stem_path, final_path)
+            final_stems[stem_name] = final_path
+
+        # Step 3: Transcribe each stem to MIDI
+        midi_dir = output_dir / "midi"
+        midi_dir.mkdir(exist_ok=True)
+
+        midi_files = {}
+        for stem_name, stem_path in final_stems.items():
+            midi_path = transcribe_to_midi(stem_path, midi_dir)
+            if midi_path:
+                midi_files[stem_name] = midi_path
+
+        print(f"\nProcessing complete!")
+        print(f"Output directory: {output_dir}")
+        print(f"Stems: {list(final_stems.keys())}")
+        print(f"MIDI files: {list(midi_files.keys())}")
+
+        return {
+            "output_dir": output_dir,
+            "stems": final_stems,
+            "midi_files": midi_files
+        }
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Music Analysis Pipeline")
+    parser.add_argument("input_file", help="Path to input audio file")
+    parser.add_argument("-o", "--output", default="./output",
+                        help="Output directory (default: ./output)")
+    parser.add_argument("--two-stems", action="store_true",
+                        help="Use 2-stem separation (vocals/accompaniment) instead of 4-stem")
+
+    args = parser.parse_args()
+
+    try:
+        result = process_song(
+            args.input_file,
+            args.output,
+            use_4stems=not args.two_stems
+        )
+
+        if result:
+            print(f"\nSuccess! Check {result['output_dir']} for results.")
+
+    except Exception as e:
+        print(f"Error: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
-    recipes_map = load_recipes("../src/assets/recipe.json")
-    entities_map = load_entities("./entity.json")
-
-    category_to_crafters: Dict[str, Dict[str, float]] = {}
-    resources: MutableSet[str] = set()
-
-    for entity in entities_map.values():
-        if entity.resource_category is not None:
-            recipes_map[f"{entity.name}_{entity.resource_category}"] = RecipeData(
-                name=f"{entity.name}_{entity.resource_category}",
-                energy=1,
-                ingredients=[],
-                products=entity.mineable_products,
-                category=f"{entity.resource_category}-pseudorecipe",
-            )
-            for product in entity.mineable_products:
-                resources.add(product.name)
-        if entity.crafting_categories is not None:
-            for category in entity.crafting_categories:
-                if category not in category_to_crafters:
-                    category_to_crafters[category] = {}
-                category_to_crafters[category][entity.name] = entity.crafting_speed
-
-    recipes_to_ignore: MutableSet[str] = set()
-    recipes_by_ingredient: Dict[str, List[str]] = {}
-    recipes_by_product: Dict[str, List[str]] = {}
-
-    for name, recipe in recipes_map.items():
-        for ingredient in recipe.ingredients:
-            if recipes_by_ingredient.get(ingredient.name) is None:
-                recipes_by_ingredient[ingredient.name] = []
-            recipes_by_ingredient[ingredient.name].append(recipe.name)
-        for product in recipe.products:
-            if recipes_by_product.get(product.name) is None:
-                recipes_by_product[product.name] = []
-            recipes_by_product[product.name].append(recipe.name)
-
-    # Find pairs of recipes where all products of one are ingredients of the other
-    # visited_recipes: Dict[str, Dict[str, bool]] = {}
-
-    start_time = time.time()
-
-    print("Checking redundant recipes...")
-    recipes = list(recipes_map.values())
-    recipe_products = {recipe.name: {
-        product.name for product in recipe.products} for recipe in recipes}
-    recipe_ingredients = {recipe.name: {
-        ingredient.name for ingredient in recipe.ingredients} for recipe in recipes}
-
-    for recipe_a_index, recipe_a in enumerate(recipes[:-1]):
-        product_names_a = recipe_products[recipe_a.name]
-        ingredient_names_a = recipe_ingredients[recipe_a.name]
-
-        for recipe_b in recipes[recipe_a_index+1:]:
-            product_names_b = recipe_products[recipe_b.name]
-            ingredient_names_b = recipe_ingredients[recipe_b.name]
-
-            if product_names_a == ingredient_names_b and product_names_b == ingredient_names_a:
-                recipes_to_ignore.add(recipe_a.name)
-                recipes_to_ignore.add(recipe_b.name)
-
-    print("Finished! Now making a recipe plan.")
-
-    recipe_plan: Dict[str, float] = {}
-    blocked_items: MutableSet[str] = set()
-
-    start_time = time.time()
-
-    while len(get_plan_deficits(recipes_map, recipe_plan, resources, blocked_items)) > 0:
-        if time.time() - start_time > 10:
-            print('Breaking for time')
-            break
-        for item, rate in get_plan_deficits(recipes_map, recipe_plan, resources, blocked_items):
-            outcome = find_best_recipe_for_item(
-                recipes_map, recipes_by_product, recipes_to_ignore, recipe_plan, item, -1.0*rate)
-            if (outcome is None):
-                blocked_items.add(item)
-            else:
-                recipe_name, multi = outcome
-                recipe_plan[recipe_name] = multi
-                print(f"added {recipe_name}")
-
-    start_time = time.time()
-    log_time = start_time
-    current_score = get_plan_score(recipes_map, recipe_plan)
-    last_log_score = current_score
-
-    while (time.time() - start_time < 80):
-        if time.time() - log_time >= 2:
-            print(f"{last_log_score} --> {current_score}")
-            log_time = time.time()
-            last_log_score = current_score
-
-        new_plan = {}
-        for recipe, multi in recipe_plan.items():
-            if recipe != 'space-science-pack':
-                new_plan[recipe] = multi * (1 + (random.random()-0.5)/2)
-            else:
-                new_plan[recipe] = multi
-        new_score = get_plan_score(recipes_map, new_plan)
-        if new_score < current_score:
-            recipe_plan = new_plan
-            current_score = new_score
-
-    # Dump recipe_plan to a CSV file
-    with open("./recipe_plan.csv", "w", newline="") as csvfile:
-        writer = csv.writer(csvfile)
-        writer.writerow(["Recipe", "Multiplier"])
-        for recipe, multiplier in recipe_plan.items():
-            writer.writerow([recipe, multiplier])
-
-    # Dump the output of get_plan_rates to a CSV file
-    plan_rates = get_plan_rates(recipes_map, recipe_plan)
-    with open("./plan_rates.csv", "w", newline="") as csvfile:
-        writer = csv.writer(csvfile)
-        writer.writerow(["Item", "Rate"])
-        for item, rate in plan_rates.items():
-            writer.writerow([item, rate])
+    main()
